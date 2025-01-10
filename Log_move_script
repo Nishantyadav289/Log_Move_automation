@@ -1,0 +1,70 @@
+#!/bin/bash
+
+# Source directory containing logs
+SOURCE_DIR="/var/log/opt/CPsuite-R81.10/fw1/log/"
+
+# Destination directory for old logs
+DEST_DIR="/var/log/opt/CPsuite-R81.10/fw1/log/old_logs(all_adt&log)"
+
+# Specific log file patterns to include (add patterns as needed)
+LOG_PATTERNS=("*.log" "*.adtlog*")
+
+# Remote server details for SCP
+REMOTE_SERVER="test@172.31.254.40"
+REMOTE_PATH="/home/test/adtlog/"
+REMOTE_PASSWORD="yourpassword"  # Replace with the actual password (unsecure, see Note below)
+
+# Create the destination directory if it doesn't exist
+mkdir -p "$DEST_DIR"
+
+echo "Searching for logs older than 60 days in $SOURCE_DIR matching patterns: ${LOG_PATTERNS[*]}..."
+
+for PATTERN in "${LOG_PATTERNS[@]}"; do
+    echo "Processing logs matching pattern: $PATTERN"
+    
+    # Find logs older than 60 days and move them to the destination directory
+    find "$SOURCE_DIR" -type f -name "$PATTERN" -mtime +60 -print0 | while IFS= read -r -d '' FILE; do
+        echo "Source Path: $FILE"
+        DEST_FILE="$DEST_DIR/$(basename "$FILE")"
+        echo "Destination Path: $DEST_FILE"
+        
+        # Only move if the file is not already in the destination
+        if [ "$FILE" != "$DEST_FILE" ]; then
+            mv "$FILE" "$DEST_DIR"
+            if [[ $? -eq 0 ]]; then
+                echo "Moved: $FILE to $DEST_DIR"
+            else
+                echo "Failed to move: $FILE"
+            fi
+        else
+            echo "File is already in the destination directory: $FILE"
+        fi
+    done
+done
+
+echo "Log processing completed. All matching files older than 60 days have been moved to $DEST_DIR."
+
+# Wait for 30 seconds after moving logs
+echo "Waiting for 30 seconds before transferring logs to the remote server..."
+sleep 30
+
+# SCP command to transfer files to the remote server using sshpass
+echo "Starting SCP to transfer logs to remote server..."
+sshpass -p "$REMOTE_PASSWORD" scp -r "$DEST_DIR"/* "$REMOTE_SERVER:$REMOTE_PATH"
+
+# Check if SCP was successful
+if [ $? -eq 0 ]; then
+    echo "Logs transferred successfully to $REMOTE_SERVER:$REMOTE_PATH"
+    
+    # Remove the destination directory after successful SCP
+    echo "Removing destination directory: $DEST_DIR"
+    rm -rf "$DEST_DIR"
+    
+    if [ $? -eq 0 ]; then
+        echo "Destination directory removed successfully."
+    else
+        echo "Failed to remove destination directory."
+    fi
+else
+    echo "SCP failed to transfer logs. Destination directory will not be removed."
+fi
